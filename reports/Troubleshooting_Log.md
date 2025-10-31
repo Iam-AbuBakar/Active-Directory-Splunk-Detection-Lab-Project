@@ -86,8 +86,8 @@ This document logs all errors encountered, diagnostic steps, and solutions imple
 •	Solution:
 1.	On ADDC01, the GUI for changing time was greyed out ("Managed by your organization").
 2.	Opened Admin PowerShell on ADDC01 and forced the time:
-	tzutil /s "India Standard Time"
-	Set-Date -Date "2025-10-30 00:35:00" (or current time)
+	tzutil /s "India Standard Time"
+	Set-Date -Date "2025-10-30 00:35:00" (or current time)
 3.	On target-PC, went to "Date & time" settings and clicked "Sync now" to sync with the now-correct Domain Controller.
 4.	Restarted the SplunkForwarderService on all Windows VMs. Logs immediately resumed flowing with correct timestamps.
 13. Atomic Red Team: Attacks Fail (Windows Defender)
@@ -96,9 +96,9 @@ This document logs all errors encountered, diagnostic steps, and solutions imple
 •	Solution:
 1.	On target-PC, navigated to "Virus & threat protection" > "Manage settings".
 2.	Turned OFF all layers of protection:
-	Real-time protection
-	Cloud-delivered protection
-	Automatic sample submission
-	Tamper Protection
+	Real-time protection
+	Cloud-delivered protection
+	Automatic sample submission
+	Tamper Protection
 3.	Re-ran the Invoke-AtomicTest commands. The attacks now executed successfully, and the corresponding detection logs (EventCode=1, EventCode=8, EventCode=4104) appeared in Splunk as expected.
 
