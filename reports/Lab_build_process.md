@@ -1,143 +1,163 @@
 Active Directory & Splunk Detection Lab: Full Process Report
-This report details the end-to-end process for building the lab, based on the MyDFIR video series and tailored to this specific project's configuration.
-1. Project Overview
-Objective
-To build a functional cyber-security lab to simulate, detect, and analyze adversary techniques using Active Directory, Splunk, Sysmon, Kali Linux, and Atomic Red Team.
-Lab Architecture
-VM Name		Operating System		IP Address	Purpose
-ADDC01		Windows Server 2022		192.168.10.7	Domain Controller (abu.local), DNS Server
-SplunkSrv		Ubuntu Server 22.04		192.168.10.10	SIEM / Log Aggregator
-target-PC		Windows 10		192.168.10.100	Victim Workstation, joined to domain
-Kali		Kali Linux		192.168.10.250	Attacker Machine
+This document details the end-to-end process for building a fully functional cybersecurity detection lab. The lab is designed to simulate a small corporate network, ingest security logs into a SIEM, and then run simulated attacks to test detection capabilities.
+The final architecture consists of four virtual machines:
+•	ADDC01: A Windows Server 2022 Domain Controller (abu.local).
+•	abu@ubuntuserver: An Ubuntu Server running Splunk Enterprise.
+•	target-PC: A Windows 10 victim workstation, joined to the domain.
+•	Kali-Attacker: A Kali Linux machine for Red Team operations.
+Phase 1: Virtual Network & VM Setup
+1.1. Create Virtual Network
+The first step was to create an isolated network for the VMs to communicate.
+1.	Tool: VirtualBox
+2.	Action: Navigated to File > Tools > Network Manager.
+3.	Configuration:
+o	Created a new NAT Network named AD-Project.
+o	Set the Network CIDR to 192.168.10.0/24.
+o	Ensured Enable DHCP was checked.
+1.2. Provision Virtual Machines
+The following four VMs were created and downloaded:
+•	ADDC01: Windows Server 2022 (Standard w/ Desktop Experience)
+•	abu@ubuntuserver: Ubuntu Server 22.04
+•	target-PC: Windows 10 Enterprise
+•	Kali-Attacker: Kali Linux (Pre-built VM image)
+All four VMs were configured in VirtualBox settings to have their Network Adapter 1 "Attached to: NAT Network" with the Name: "AD-Project".
+Phase 2: Splunk SIEM Server Configuration (abu@ubuntuserver)
+2.1. Set Static IP
+The Ubuntu server was configured with a static IP to be a reliable target for logs.
+1.	File Edited: /etc/netplan/00-installer-config.yaml
+2.	Configuration:
+3.	network:
+4.	  ethernets:
+5.	    enp0s3:
+6.	      dhcp4: no
+7.	      addresses: [192.168.10.10/24]
+8.	      routes:
+9.	        - to: default
+10.	          via: 192.168.10.1
+11.	      nameservers:
+12.	        addresses: [8.8.8.8]
+13.	  version: 2
+14.	Command: sudo netplan apply was run to apply the changes.
+2.2. Install Splunk Enterprise
+1.	File Transfer: The Splunk Enterprise .deb package was downloaded on the host machine. A VirtualBox Shared Folder was used to transfer the file to the Ubuntu VM.
+2.	Disk Resizing: The initial install failed due to No space left on device. The VM's disk was resized using the LVM command-line tools (growpart, pvresize, lvextend, resize2fs). (See Troubleshooting Report for details).
+3.	Installation: sudo dpkg -i splunk-enterprise-package.deb
+4.	First-Time Setup:
+o	Started Splunk: /opt/splunk/bin/splunk start --accept-license
+o	Created admin user and password.
+o	Enabled Splunk to start on boot: /opt/splunk/bin/splunk enable boot-start
+5.	Splunk Web UI Configuration:
+o	Logged into Splunk at http://192.168.10.10:8000.
+o	Enabled Log Receiving: Navigated to Settings > Forwarding and receiving > Configure receiving. Created a new "Receive data" port on 9997.
+o	Created Index: Navigated to Settings > Indexes. Created a new index named endpoint.
+Phase 3: Endpoint & AD Server Configuration
+3.1. Install Sysmon
+On both target-PC (Windows 10) and ADDC01 (Windows Server), Sysmon was installed for advanced logging.
+1.	Configuration File: The popular Olaf Hartong Sysmon configuration was downloaded.
+2.	Command: sysmon.exe -accepteula -i sysmonconfig.xml
+3.2. Install Splunk Universal Forwarder
+On both target-PC and ADDC01, the Splunk Universal Forwarder was installed.
+1.	During the graphical installer, the Receiving Indexer was set to 192.168.10.10:9997.
+2.	The Deployment Server was left blank.
+3.3. Configure inputs.conf
+On both target-PC and ADDC01, the file C:\Program Files\SplunkUniversalForwarder\etc\apps\search\local\inputs.conf was created to tell the forwarder which logs to send.
+[WinEventLog://Application]
+disabled = 0
+index = endpoint
 
-2. Phase 1: VM Creation & Network Setup
-1.	Download OS Images:
-o	Windows Server 2022 (Evaluation ISO)
-o	Windows 10 Enterprise (Evaluation ISO)
-o	Ubuntu Server 22.04 LTS (ISO)
-o	Kali Linux (VirtualBox 64-bit Image)
-2.	Install VirtualBox:
-o	Installed VirtualBox 7.x and the accompanying Extension Pack.
-3.	Create Virtual Network:
-o	In VirtualBox, navigated to File > Tools... > Network Manager.
-o	Created a new NAT Network with the following settings:
-Network Name: AD-Project
-Network CIDR: 192.168.10.0/24
-DHCP: Enabled
-4.	Install Virtual Machines:
-o	Created four new VMs (ADDC01, SplunkSrv, target-PC, Kali) with appropriate RAM (4GB+) and Disk Size (40GB+).
-o	For the three Windows/Ubuntu VMs, installed the OS from the downloaded ISOs.
-o	For Kali, imported the downloaded .ova file.
-o	Attached all four VMs' network adapters to the AD-Project NAT Network.
-3. Phase 2: Splunk Server Configuration (SplunkSrv)
-1.	Set Static IP:
-o	Logged into the Ubuntu server (abu@ubuntuserver).
-o	Edited the netplan config file: sudo nano /etc/netplan/00-installer-config.yaml.
-o	Set the configuration for a static IP:
-o	network:
-o	  ethernets:
-o	    enp0s3:
-o	      dhcp4: no
-o	      addresses: [192.168.10.10/24]
-o	      routes:
-o	        - to: default
-o	          via: 192.168.10.1
-o	      nameservers:
-o	        addresses: [8.8.8.8]
-o	  version: 2
-o	Applied the settings: sudo netplan apply.
-2.	Install Splunk Enterprise:
-o	Downloaded the Splunk Enterprise .deb file from splunk.com.
-o	To get the file into the VM, a VirtualBox Shared Folder was set up:
-Installed guest utilities: sudo apt-get install virtualbox-guest-utils
-Added user to the group: sudo adduser abu vboxsf (requires reboot)
-Mounted the share: sudo mount -t vboxsf [Share_Name] [mount_point]
-o	Installed Splunk from the shared file: sudo dpkg -i splunk-enterprise-....deb
-o	Started Splunk and accepted the license: sudo /opt/splunk/bin/splunk start --accept-license
-o	Enabled Splunk to start on boot: sudo /opt/splunk/bin/splunk enable boot-start -user splunk
-3.	Configure Splunk Server:
-o	Logged into the web UI at http://192.168.10.10:8000.
-o	Enable Receiving: Navigated to Settings > Forwarding & Receiving > Configure Receiving and enabled port 9997.
-o	Create Index: Navigated to Settings > Indexes and created a new index named endpoint.
-4. Phase 3: Domain Controller Setup (ADDC01)
-1.	Rename Server:
-o	In Server Manager or PowerShell, renamed the server to ADDC01 and rebooted.
-2.	Set Static IP & DNS:
-o	Configured the server's network adapter with its static IP:
-IP: 192.168.10.7
-Subnet: 255.255.255.0
-Gateway: 192.168.10.1
-DNS: 8.8.8.8 (This is temporary, before AD is installed).
-3.	Install Active Directory Role:
-o	In Server Manager, selected Manage > Add Roles and Features.
-o	Installed the Active Directory Domain Services (AD DS) role.
-4.	Promote to Domain Controller:
-o	After installation, clicked the notification flag and selected "Promote this server to a domain controller."
-o	Selected "Add a new forest" and set the Root domain name: abu.local.
-o	After the promotion and reboot, the server's DNS was automatically set to 127.0.0.1.
-o	Configured DNS Forwarders: In the DNS Manager tool, went to server Properties > Forwarders, and added 8.8.8.8 to allow the domain to resolve external addresses.
+[WinEventLog://Security]
+disabled = 0
+index = endpoint
+
+[WinEventLog://System]
+disabled = 0
+index = endpoint
+
+[WinEventLog://Microsoft-Windows-Sysmon/Operational]
+disabled = 0
+index = endpoint
+
+[WinEventLog://Microsoft-Windows-PowerShell/Operational]
+disabled = 0
+index = endpoint
+3.	The SplunkForwarderService was Restarted on both machines via services.msc to apply the new configuration. After troubleshooting, logs from both hosts appeared in Splunk under index=endpoint.
+3.4. Configure Active Directory (ADDC01)
+1.	Static IP: Set the server's static IP to 192.168.10.7 and its DNS server to 127.0.0.1.
+2.	Install AD DS: Opened Server Manager and used the "Add Roles and Features" wizard to install the Active Directory Domain Services role.
+3.	Promote to Domain Controller:
+o	Promoted the server to a new forest.
+o	Set the Root domain name: abu.local.
+o	Set a DSRM password.
+4.	Configure DNS Forwarder:
+o	Opened Server Manager > Tools > DNS.
+o	Right-clicked the server (ADDC01) > Properties > Forwarders tab.
+o	Added 8.8.8.8 as a forwarder to allow the domain to resolve external internet addresses.
 5.	Create Users & OUs:
 o	Opened Active Directory Users and Computers (ADUC).
-o	Created two new Organizational Units (OUs): IT and HR.
-o	Created two new users:
-Aryan Singh (asingh) in the IT OU.
-Akansha Priya (apriya) in the HR OU.
-o	Set a complex password for both users (e.g., PassWord@123).
-5. Phase 4: Endpoint Configuration (target-PC)
-1.	Rename PC:
-o	Renamed the Windows 10 VM to target-PC and rebooted.
-2.	Install Sysmon:
-o	Downloaded Sysmon from Microsoft.
-o	Downloaded a community configuration file (e.g., Olaf Hartong's) and named it sysmonconfig.xml.
-o	Installed from an administrative command prompt: sysmon64.exe -accepteula -i sysmonconfig.xml
-3.	Install Splunk Universal Forwarder:
-o	Installed the .msi package.
-o	During setup, for "Receiving Indexer," entered 192.168.10.10:9997.
-o	Created the inputs.conf file at C:\Program Files\SplunkUniversalForwarder\etc\apps\search\local\inputs.conf with the logging stanzas for Application, Security, System, Microsoft-Windows-Sysmon/Operational, and Microsoft-Windows-PowerShell/Operational, all pointing to index = endpoint.
-o	Critical: Opened services.msc, right-clicked SplunkForwarderService, went to Properties > Log On, and changed the account to "Local System account". This is required for the forwarder to have permission to read all event logs.
-o	Restarted the SplunkForwarderService.
-4.	Join PC to Domain:
-o	Set the target-PC's network adapter Preferred DNS to 192.168.10.7 (the AD server).
-o	Went to System Properties > Change... and joined the domain abu.local.
-o	Rebooted and logged in as the domain user abu\asingh.
-6. Phase 5: Attack Simulation & Detection
-Attack 1: RDP Brute Force (T1110.001)
-1.	Kali Setup:
-o	Configured the Kali VM with a static IP (192.168.10.250) and DNS (192.168.10.7) using nmcli.
-o	Prepared a small password list, passwords.txt, containing PassWord@123.
-2.	Target Setup (target-PC):
-o	As an administrator, enabled Remote Desktop.
-o	In SystemPropertiesAdvanced > Remote, unchecked the box for "Allow connections only from... with Network Level Authentication (NLA)" to allow older tools to connect.
-o	In Windows Defender Firewall, allowed the "Remote Desktop" app through for the "Domain" profile.
-3.	Attack (Kali):
-o	Used Hydra to simulate the attack (as crowbar failed due to protocol issues).
-o	Command: hydra -V -t 4 -l asingh -P passwords.txt rdp://192.168.10.100
-o	Result: [3389][rdp] host: 192.168.10.100 login: asingh password: PassWord@123
-4.	Detection (Splunk):
-o	Hunted for the behavior of a brute-force attack (a high volume of failed logins).
-o	Splunk Query:
-o	index=endpoint EventCode=4625
-o	| stats count by "Source Network Address", "Account Name" 
-o	| sort - count
-o	Result: The query returned 21 failed login attempts (EventCode 4625) from the Kali IP (192.168.10.250) against the asingh account, successfully identifying the attack.
-Attack 2: Atomic Red Team (T1136.001 - Local Account)
-1.	Target Setup (target-PC):
-o	Defender Exclusion: Add-MpPreference -ExclusionPath "C:\"
-o	PowerShell Policy: Set-ExecutionPolicy Bypass -Force
-o	Install Atomic Red Team:
-o	IEX (IWR [https://raw.githubusercontent.com/redcanaryco/invoke-atomicredteam/master/install-atomicredteam.ps1](https://raw.githubusercontent.com/redcanaryco/invoke-atomicredteam/master/install-atomicredteam.ps1) -UseBasicParsing);
-o	Install-AtomicRedTeam -getAtomics
-o	(Note: This required manually installing the powershell-yaml module via Install-Module powershell-yaml -Force).
-2.	Attack (target-PC):
-o	Loaded the module: Import-Module AtomicRedTeam
-o	Ran the test battery for T1136.001: Invoke-AtomicTest T1136.001
-o	Result: The test output showed the successful creation, escalation (added to Administrators group), and deletion of a user named Newlocaluser.
-3.	Detection (Splunk):
-o	Hunted for the specific Event Codes related to this activity.
+o	Created new Organizational Units (OUs) for IT and HR.
+o	Created a user Aryan Singh (asingh) in the IT OU.
+o	Created a user Akansha Priya (apriya) in the HR OU.
+o	Set complex passwords for both (e.g., PassWord@123!).
+3.5. Join Workstation to Domain (target-PC)
+1.	Set Static IP: Set the target-PC IP to 192.168.10.100.
+2.	Set DNS: Critically, set the target-PC's Preferred DNS server to 192.168.10.7 (the Domain Controller).
+3.	Join Domain:
+o	Navigated to System Properties > Change...
+o	Changed from "Workgroup" to "Domain:" and entered abu.local.
+o	Authenticated with the domain admin credentials to join the computer to the domain.
+o	Rebooted the machine and logged in as the domain user ABU\asingh.
+Phase 4: Attacker Machine Configuration (Kali-Attacker)
+1.	Set Static IP: The VM was re-installed to fix a VirtualBox networking bug. The static IP was then set using nmcli to ensure it was permanent.
+2.	# Create a new, clean connection profile tied to the correct interface
+3.	sudo nmcli connection add type ethernet con-name "LabNetwork" ifname eth0 ipv4.method manual ipv4.addresses 192.168.10.250/24 ipv4.gateway 192.168.10.1 ipv4.dns "192.168.10.7"
+4.	
+5.	# Bring the new connection up
+6.	sudo nmcli connection up "LabNetwork"
+7.	Install Tools: Installed hydra and crowbar (sudo apt-get install hydra crowbar).
+Phase 5: Attack, Detection, & Analysis
+Attack 1: RDP Brute Force (MITRE T1110.001)
+1.	Preparation (on target-PC):
+o	Enabled "Remote Desktop" in System Properties.
+o	Added ABU\asingh to the "Remote Desktop Users" group.
+o	Disabled Network Level Authentication (NLA) to allow older tools (like hydra) to connect.
+2.	Attack (on Kali-Attacker):
+o	A password list passwords.txt was created, including the known password PassWord@123.
+o	crowbar failed, so Hydra was used:
+3.	hydra -V -t 4 -l asingh -P passwords.txt rdp://192.168.10.100
+o	The attack succeeded and found the password.
+4.	Detection (in Splunk):
+o	Query: index=endpoint host=target-PC EventCode=4625
+o	Result: This query returned 21 events for "An account failed to log on," all for the user asingh and originating from the Kali IP (192.168.10.250), confirming the brute-force attack.
+Attack 2: Local Account Creation (MITRE T1136.001)
+1.	Preparation (on target-PC):
+o	Atomic Red Team was installed.
+o	The missing powershell-yaml dependency was installed via Install-Module powershell-yaml -Force.
+o	The main framework was installed: Install-AtomicRedTeam -getAtomics.
+2.	Attack (on target-PC):
+o	The module was imported: Import-Module AtomicRedTeam
+o	The test was run: Invoke-AtomicTest T1136.001
+o	This test successfully created a new local user (Newlocaluser), added it to the Administrators group, and then deleted it.
+3.	Detection (in Splunk):
 o	Query 1 (Creation): index=endpoint host=target-PC EventCode=4720 TargetUserName=Newlocaluser
-o	Query 2 (Added to Admin): index=endpoint host=target-PC EventCode=4732 Group_Name=Administrators MemberName=Newlocaluser
-o	Query 3 (Deletion): index=endpoint host=target-PC EventCode=4726 TargetUserName=Newlocaluser
-o	Result: All three queries returned events, successfully showing the entire lifecycle of the attacker's persistence attempt.
-7. Conclusion
-The lab environment was successfully built, configured, and hardened. All setup steps were completed, resulting in a stable platform. We successfully simulated two distinct adversary techniques (RDP brute-force and local account creation) and subsequently detected the full event chain for both attacks using targeted Splunk queries. The lab is now fully operational for further detection engineering and threat hunting exercises.
+o	Query 2 (Privilege Escalation): index=endpoint host=target-PC EventCode=4732 Group_Name=Administrators MemberName=Newlocaluser
+o	Result: All events were successfully found, showing the full lifecycle of the attacker's persistence attempt.
+Attack 3: System Information Discovery (MITRE T1082)
+1.	Preparation (on target-PC):
+o	All Windows Defender protections (Real-time, Cloud-delivered, etc.) were disabled to allow the test script to run unblocked.
+2.	Attack (on target-PC):
+o	Invoke-AtomicTest T1082
+o	This test ran a series of commands (whoami.exe, systeminfo.exe, netstat.exe, etc.) to gather information about the host.
+3.	Detection (in Splunk):
+o	Query 1 (Sysmon): index=endpoint host=target-PC sourcetype="XmlWinEventLog:Microsoft-Windows-Sysmon/Operational" EventCode=1
+o	Query 2 (PowerShell): index=endpoint host=target-PC EventCode=4104
+o	Result: Both queries successfully detected the attack. The EventCode=1 query showed the suspicious cluster of process creations, and EventCode=4104 captured the exact PowerShell script block content.
+Attack 4: Process Injection (MITRE T1055.001)
+1.	Preparation (on target-PC):
+o	All Windows Defender protections were confirmed to be disabled.
+2.	Attack (on target-PC):
+o	Invoke-AtomicTest T1055.001 -TestNumbers 1
+o	This test simulated injecting a malicious DLL into a PowerShell process.
+3.	Detection (in Splunk):
+o	Query: index=endpoint host=target-PC sourcetype="XmlWinEventLog:Microsoft-Windows-Sysmon/Operational" EventCode=8 SourceImage="*\\powershell.exe"
+o	Result: The query successfully identified the EventCode=8 (CreateRemoteThread) event where powershell.exe was the source image, confirming detection of the injection.
 
